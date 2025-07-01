@@ -55,29 +55,32 @@ function App() {
   };
 
   const processFlightData = (data: any[]): FlightRecord[] => {
-    return data.map((row, index) => ({
-      ser: row['Ser'] || `${index + 1}`,
-      date: row['Date'] || '',
-      from: row['From'] || '',
-      to: row['To'] || '',
-      blockHours: parseInt(row['110 hrs']) || 0,
-      blockMinutes: parseInt(row['110 min']) || 0,
-      landingHours: parseInt(row['Landing hrs']) || 0,
-      landingMinutes: parseInt(row['Landing min']) || 0,
-      flightHours: parseInt(row['FLT hrs']) || 0,
-      flightMinutes: parseInt(row['FLT min']) || 0,
-      totalFlightHours: parseInt(row['Total FLT hrs']) || 0,
-      totalFlightMinutes: parseInt(row['Total FLT min']) || 0,
-      cycles: parseInt(row['Cyc.']) || 0,
-      totalCycles: parseInt(row['Total Cyc']) || 0,
-      tlbNumber: row['TLB #'] || '',
-      lastDate: row['Last Date'] || '',
-      totalHours: parseInt(row['TOTAL HRS']) || 0,
-      totalMinutes: parseInt(row['TOTAL MIN']) || 0,
-      totalCyclesSum: parseInt(row['TOTAL CYC']) || 0,
-      hoursPerMonth: parseInt(row['HRS/MONTH']) || 0,
-      cyclesPerMonth: parseInt(row['CYC/MONTH']) || 0,
-    }));
+    return data.map((row, index) => {
+      console.log('Processing row:', row); // لتتبع البيانات
+      return {
+        ser: row['Ser'] || `${index + 1}`,
+        date: row['Date'] || '',
+        from: row['From'] || '',
+        to: row['To'] || '',
+        blockHours: parseInt((row['110 hrs'] || '').toString()) || 0,
+        blockMinutes: parseInt((row['110 min'] || '').toString()) || 0,
+        landingHours: parseInt((row['Landing hrs'] || '').toString()) || 0,
+        landingMinutes: parseInt((row['Landing min'] || '').toString()) || 0,
+        flightHours: parseInt((row['FLT hrs'] || '').toString()) || 0,
+        flightMinutes: parseInt((row['FLT min'] || '').toString()) || 0,
+        totalFlightHours: parseInt((row['Total FLT hrs'] || '').toString()) || 0,
+        totalFlightMinutes: parseInt((row['Total FLT min'] || '').toString()) || 0,
+        cycles: parseInt((row['Cyc.'] || '').toString()) || 0,
+        totalCycles: parseInt((row['Total Cyc'] || '').toString()) || 0,
+        tlbNumber: row['TLB #'] || '',
+        lastDate: row['Last Date'] || '',
+        totalHours: parseInt((row['TOTAL HRS'] || '').toString()) || 0,
+        totalMinutes: parseInt((row['TOTAL MIN'] || '').toString()) || 0,
+        totalCyclesSum: parseInt((row['TOTAL CYC'] || '').toString()) || 0,
+        hoursPerMonth: parseInt((row['HRS/MONTH'] || '').toString()) || 0,
+        cyclesPerMonth: parseInt((row['CYC/MONTH'] || '').toString()) || 0,
+      };
+    });
   };
 
   const calculateStats = (data: FlightRecord[]): FlightStats => {
@@ -95,15 +98,12 @@ function App() {
       };
     }
 
-    // Calculate total flight time
     const totalMinutes = data.reduce((sum, record) => {
-      return sum + parseTimeToMinutes(record.flightHours, record.flightMinutes);
+      return sum + parseTimeToMinutes(record.totalFlightHours, record.totalFlightMinutes);
     }, 0);
 
-    // Calculate total cycles
-    const totalCycles = data.reduce((sum, record) => sum + record.cycles, 0);
+    const totalCycles = data.reduce((sum, record) => sum + record.totalCycles, 0);
 
-    // Calculate route statistics
     const routeStats: { [key: string]: { count: number; totalTime: number } } = {};
     data.forEach(record => {
       const route = `${record.from}-${record.to}`;
@@ -111,28 +111,25 @@ function App() {
         routeStats[route] = { count: 0, totalTime: 0 };
       }
       routeStats[route].count++;
-      routeStats[route].totalTime += parseTimeToMinutes(record.flightHours, record.flightMinutes);
+      routeStats[route].totalTime += parseTimeToMinutes(record.totalFlightHours, record.totalFlightMinutes);
     });
 
-    // Find most frequent route
     const mostFrequentRoute = Object.entries(routeStats)
       .sort(([,a], [,b]) => b.count - a.count)[0]?.[0] || 'N/A';
 
-    // Calculate monthly statistics
     const monthlyStats: { [key: string]: { hours: number; flights: number; cycles: number } } = {};
     data.forEach(record => {
       if (record.date) {
-        const month = record.date.substring(0, 7); // YYYY-MM format
+        const month = record.date.substring(0, 7);
         if (!monthlyStats[month]) {
           monthlyStats[month] = { hours: 0, flights: 0, cycles: 0 };
         }
-        monthlyStats[month].hours += parseTimeToMinutes(record.flightHours, record.flightMinutes);
+        monthlyStats[month].hours += parseTimeToMinutes(record.totalFlightHours, record.totalFlightMinutes);
         monthlyStats[month].flights++;
-        monthlyStats[month].cycles += record.cycles;
+        monthlyStats[month].cycles += record.totalCycles;
       }
     });
 
-    // Calculate date range
     const dates = data.map(r => new Date(r.date)).filter(d => !isNaN(d.getTime()));
     const totalDays = dates.length > 0 ? 
       Math.ceil((Math.max(...dates.map(d => d.getTime())) - Math.min(...dates.map(d => d.getTime()))) / (1000 * 60 * 60 * 24)) + 1 : 0;
@@ -160,16 +157,24 @@ function App() {
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); // قراءة كاملة مع الHeaders
         
-        const processedData = processFlightData(jsonData);
+        const headers = jsonData[0] as string[];
+        const rows = jsonData.slice(1) as any[];
+        const processedData = rows.map(row => {
+          const record: any = {};
+          headers.forEach((header, index) => {
+            record[header.trim()] = row[index]; // تنظيف المسافات من الأعمدة
+          });
+          return processFlightData([record])[0];
+        }).filter(r => r); // فلترة السجلات الفارغة
+        
         const calculatedStats = calculateStats(processedData);
-        
         setFlightData(processedData);
         setStats(calculatedStats);
-      } catch (error) {
+      } catch (error: any) { // تحديد نوع error كـ any
         console.error('Error processing file:', error);
-        alert('Error processing file. Please ensure the file is in correct Excel format.');
+        alert(`Error processing file: ${error.message}. Please ensure the file is a valid Excel file and headers match (e.g., Date, From, To, Total FLT hrs, Total FLT min, Cyc., Total Cyc).`);
       } finally {
         setIsLoading(false);
       }
@@ -463,7 +468,7 @@ function App() {
                         <td className="px-4 py-3 text-sm text-gray-900">{record.from}</td>
                         <td className="px-4 py-3 text-sm text-gray-900">{record.to}</td>
                         <td className="px-4 py-3 text-sm font-medium text-blue-600">
-                          {formatMinutesToTime(parseTimeToMinutes(record.flightHours, record.flightMinutes))}
+                          {formatMinutesToTime(parseTimeToMinutes(record.totalFlightHours, record.totalFlightMinutes))}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-900">{record.cycles}</td>
                       </tr>
@@ -480,7 +485,6 @@ function App() {
           </div>
         )}
 
-        {/* Empty State */}
         {!stats && !isLoading && (
           <div className="text-center py-16">
             <FileSpreadsheet className="w-24 h-24 text-gray-300 mx-auto mb-6" />
