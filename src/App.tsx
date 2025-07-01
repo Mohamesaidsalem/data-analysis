@@ -54,13 +54,23 @@ function App() {
     return `${hours}:${minutes.toString().padStart(2, '0')}`;
   };
 
+  const parseTimeString = (timeStr: string): { hours: number; minutes: number } => {
+    if (!timeStr) return { hours: 0, minutes: 0 };
+    const [hours, minutes] = timeStr.split(':').map(Number) || [0, 0];
+    return { hours: isNaN(hours) ? 0 : hours, minutes: isNaN(minutes) ? 0 : minutes };
+  };
+
   const processFlightData = (data: any[]): FlightRecord[] => {
     return data.map((row, index) => {
-      let totalFlightHours = parseInt((row['Total F\\H'] || '0').toString().split(':')[0]) || 0;
-      let totalFlightMinutes = parseInt((row['Total F\\H'] || '0').toString().split(':')[1]) || 0;
-      if (isNaN(totalFlightHours) || isNaN(totalFlightMinutes)) {
+      let totalFlightHours = 0;
+      let totalFlightMinutes = 0;
+      const totalTimeStr = row['Total F\\H']?.toString() || '';
+      if (totalTimeStr.includes(':')) {
+        const { hours, minutes } = parseTimeString(totalTimeStr);
+        totalFlightHours = hours;
+        totalFlightMinutes = minutes;
+      } else {
         totalFlightHours = parseInt((row['TOTAL HRS'] || '0').toString()) || 0;
-        totalFlightMinutes = 0; // افتراضي إذا كان الوقت مش بتنسيق صح
       }
       return {
         ser: row['Ser'] || `${index + 1}`,
@@ -160,11 +170,14 @@ function App() {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0]; // استخدام الشيت الأول "SU-BVA"
+        const sheetName = workbook.SheetNames[0]; // استخدام الشيت "SU-BVA"
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
         
         const headers = jsonData[0] as string[];
+        if (!headers.includes('Date') || !headers.includes('From') || !headers.includes('To') || !headers.includes('Total F\\H') || !headers.includes('Total Cyc')) {
+          throw new Error('Missing required headers (e.g., Date, From, To, Total F\\H, Total Cyc)');
+        }
         const rows = jsonData.slice(1) as any[];
         const processedData = rows.map(row => {
           const record: any = {};
@@ -174,12 +187,16 @@ function App() {
           return processFlightData([record])[0];
         }).filter(r => r);
         
+        if (processedData.length === 0) {
+          throw new Error('No valid flight data found in the file');
+        }
+        
         const calculatedStats = calculateStats(processedData);
         setFlightData(processedData);
         setStats(calculatedStats);
       } catch (error: any) {
         console.error('Error processing file:', error);
-        alert(`Error processing file: ${error.message}. Please ensure the file is a valid Excel file and headers match (e.g., Date, From, To, Total F\\H, Total Cyc).`);
+        alert(`Error processing file: ${error.message}. Please ensure the file is a valid Excel file, headers match (e.g., Date, From, To, Total F\\H, Total Cyc), and time values are valid (e.g., HH:MM or numeric).`);
       } finally {
         setIsLoading(false);
       }
