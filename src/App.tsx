@@ -7,15 +7,15 @@ interface FlightRecord {
   date: string;
   from: string;
   to: string;
-  blockHours: number;
-  blockMinutes: number;
+  takeoffHours: number;
+  takeoffMinutes: number;
   landingHours: number;
   landingMinutes: number;
   flightHours: number;
   flightMinutes: number;
+  cycles: number;
   totalFlightHours: number;
   totalFlightMinutes: number;
-  cycles: number;
   totalCycles: number;
   tlbNumber: string;
   lastDate: string;
@@ -45,7 +45,7 @@ function App() {
   const [isDragOver, setIsDragOver] = useState(false);
 
   const parseTimeToMinutes = (hours: number, minutes: number): number => {
-    return (hours || 0) * 60 + (minutes || 0);
+    return Math.max((hours || 0) * 60 + (minutes || 0), 0); // منع القيم السلبية
   };
 
   const formatMinutesToTime = (totalMinutes: number): string => {
@@ -56,31 +56,36 @@ function App() {
 
   const processFlightData = (data: any[]): FlightRecord[] => {
     return data.map((row, index) => {
-      console.log('Processing row:', row); // لتتبع البيانات
+      let totalFlightHours = parseInt((row['Total F\\H'] || '0').toString().split(':')[0]) || 0;
+      let totalFlightMinutes = parseInt((row['Total F\\H'] || '0').toString().split(':')[1]) || 0;
+      if (isNaN(totalFlightHours) || isNaN(totalFlightMinutes)) {
+        totalFlightHours = parseInt((row['TOTAL HRS'] || '0').toString()) || 0;
+        totalFlightMinutes = 0; // افتراضي إذا كان الوقت مش بتنسيق صح
+      }
       return {
         ser: row['Ser'] || `${index + 1}`,
         date: row['Date'] || '',
         from: row['From'] || '',
         to: row['To'] || '',
-        blockHours: parseInt((row['110 hrs'] || '').toString()) || 0,
-        blockMinutes: parseInt((row['110 min'] || '').toString()) || 0,
-        landingHours: parseInt((row['Landing hrs'] || '').toString()) || 0,
-        landingMinutes: parseInt((row['Landing min'] || '').toString()) || 0,
-        flightHours: parseInt((row['FLT hrs'] || '').toString()) || 0,
-        flightMinutes: parseInt((row['FLT min'] || '').toString()) || 0,
-        totalFlightHours: parseInt((row['Total FLT hrs'] || '').toString()) || 0,
-        totalFlightMinutes: parseInt((row['Total FLT min'] || '').toString()) || 0,
-        cycles: parseInt((row['Cyc.'] || '').toString()) || 0,
-        totalCycles: parseInt((row['Total Cyc'] || '').toString()) || 0,
+        takeoffHours: parseInt((row['T\\O hrs'] || '0').toString()) || 0,
+        takeoffMinutes: parseInt((row['T\\O min'] || '0').toString()) || 0,
+        landingHours: parseInt((row['Landing hrs'] || '0').toString()) || 0,
+        landingMinutes: parseInt((row['Landing min'] || '0').toString()) || 0,
+        flightHours: parseInt((row['F\\H hrs'] || '0').toString()) || 0,
+        flightMinutes: parseInt((row['F\\H min'] || '0').toString()) || 0,
+        cycles: parseInt((row['Cyc.'] || '0').toString()) || 0,
+        totalFlightHours,
+        totalFlightMinutes,
+        totalCycles: parseInt((row['Total Cyc'] || '0').toString()) || 0,
         tlbNumber: row['TLB #'] || '',
         lastDate: row['Last Date'] || '',
-        totalHours: parseInt((row['TOTAL HRS'] || '').toString()) || 0,
-        totalMinutes: parseInt((row['TOTAL MIN'] || '').toString()) || 0,
-        totalCyclesSum: parseInt((row['TOTAL CYC'] || '').toString()) || 0,
-        hoursPerMonth: parseInt((row['HRS/MONTH'] || '').toString()) || 0,
-        cyclesPerMonth: parseInt((row['CYC/MONTH'] || '').toString()) || 0,
+        totalHours: parseInt((row['TOTAL HRS'] || '0').toString()) || 0,
+        totalMinutes: parseInt((row['TOTAL MIN'] || '0').toString()) || 0,
+        totalCyclesSum: parseInt((row['TOTAL CYC'] || '0').toString()) || 0,
+        hoursPerMonth: parseInt((row['HRS/MOUNTH'] || '0').toString()) || 0,
+        cyclesPerMonth: parseInt((row['CYC/MOUNTH'] || '0').toString()) || 0,
       };
-    });
+    }).filter(r => r.ser && r.date); // فلترة السجلات الفارغة
   };
 
   const calculateStats = (data: FlightRecord[]): FlightStats => {
@@ -120,7 +125,7 @@ function App() {
     const monthlyStats: { [key: string]: { hours: number; flights: number; cycles: number } } = {};
     data.forEach(record => {
       if (record.date) {
-        const month = record.date.substring(0, 7);
+        const month = new Date(record.date).toISOString().substring(0, 7);
         if (!monthlyStats[month]) {
           monthlyStats[month] = { hours: 0, flights: 0, cycles: 0 };
         }
@@ -155,26 +160,26 @@ function App() {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
+        const sheetName = workbook.SheetNames[0]; // استخدام الشيت الأول "SU-BVA"
         const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); // قراءة كاملة مع الHeaders
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
         
         const headers = jsonData[0] as string[];
         const rows = jsonData.slice(1) as any[];
         const processedData = rows.map(row => {
           const record: any = {};
           headers.forEach((header, index) => {
-            record[header.trim()] = row[index]; // تنظيف المسافات من الأعمدة
+            record[header.trim().replace(/\\|[\s\n]+/g, '')] = row[index];
           });
           return processFlightData([record])[0];
-        }).filter(r => r); // فلترة السجلات الفارغة
+        }).filter(r => r);
         
         const calculatedStats = calculateStats(processedData);
         setFlightData(processedData);
         setStats(calculatedStats);
-      } catch (error: any) { // تحديد نوع error كـ any
+      } catch (error: any) {
         console.error('Error processing file:', error);
-        alert(`Error processing file: ${error.message}. Please ensure the file is a valid Excel file and headers match (e.g., Date, From, To, Total FLT hrs, Total FLT min, Cyc., Total Cyc).`);
+        alert(`Error processing file: ${error.message}. Please ensure the file is a valid Excel file and headers match (e.g., Date, From, To, Total F\\H, Total Cyc).`);
       } finally {
         setIsLoading(false);
       }
@@ -233,7 +238,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-      {/* Header */}
       <header className="bg-white/80 backdrop-blur-md shadow-sm border-b border-gray-200/50 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
@@ -264,7 +268,6 @@ function App() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* File Upload Area */}
         <div className="mb-8">
           <div
             className={`relative border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-300 ${
@@ -312,10 +315,8 @@ function App() {
           </div>
         </div>
 
-        {/* Statistics Dashboard */}
         {stats && (
           <div className="space-y-8">
-            {/* Main Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/50 p-6 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1">
                 <div className="flex items-center justify-between">
@@ -370,9 +371,7 @@ function App() {
               </div>
             </div>
 
-            {/* Additional Stats */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Route Analysis */}
               <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/50 p-6">
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-lg font-semibold text-gray-900">Route Analysis</h3>
@@ -394,7 +393,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Monthly Statistics */}
               <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/50 p-6">
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-lg font-semibold text-gray-900">Monthly Statistics</h3>
@@ -420,7 +418,6 @@ function App() {
               </div>
             </div>
 
-            {/* Top Routes */}
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/50 p-6">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-semibold text-gray-900">Top Routes</h3>
@@ -447,7 +444,6 @@ function App() {
               </div>
             </div>
 
-            {/* Recent Data Preview */}
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/50 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-6">Data Preview</h3>
               <div className="overflow-x-auto">
